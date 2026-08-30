@@ -12,8 +12,8 @@ export const MODEL = "qwen3.8-27b";
 
 // Free-tier guard rails.
 const RATE_LIMIT_PER_KEY_PER_MIN = 55;
-const STALL_MS = 60_000; // no new story text for this long => retry on another key
-const HARD_TIMEOUT_MS = 300_000;
+const STALL_MS = 35_000; // no new visible answer text for this long => retry on another key
+const HARD_TIMEOUT_MS = 180_000;
 
 export function getKeys(): string[] {
   const keys = [
@@ -55,20 +55,36 @@ type StreamResult = { text: string; finished: boolean };
 // arrive within a few seconds, so neither the host nor the browser gives up, and
 // a genuinely frozen generation is detected by the stall timer instead of by a
 // five minute silence.
-async function streamOnce(
-  key: string,
-  body: Record<string, unknown>,
-): Promise<StreamResult> {
+async function streamOnce(key: string, body: Record<string, unknown>): Promise<StreamResult> {
   const controller = new AbortController();
-  let lastByte = Date.now();
+  let lastContent = Date.now();
   const started = Date.now();
   const watchdog = setInterval(() => {
-    if (Date.now() - lastByte > STALL_MS || Date.now() - started > HARD_TIMEOUT_MS) {
+    // Qwen may still emit hidden reasoning even when thinking is disabled. Those
+    // bytes are not useful output and must not keep a stalled request alive.
+    if (Date.now() - lastContent > STALL_MS || Date.now() - started > HARD_TIMEOUT_MS) {
       controller.abort();
     }
   }, 2000);
 
   try {
+    const messages = Array.isArray(body["messages"])
+      ? body["messages"].map((message, index, all) => {
+          if (
+            index !== all.length - 1 ||
+            !message ||
+            typeof message !== "object" ||
+            !("role" in message) ||
+            !("content" in message) ||
+            message.role !== "user" ||
+            typeof message.content !== "string"
+          ) {
+            return message;
+          }
+          return { ...message, content: `${message.content}\n\n/no_think` };
+        })
+      : body["messages"];
+
     const res = await fetch(BASE_URL, {
       method: "POST",
       signal: controller.signal,
@@ -77,7 +93,14 @@ async function streamOnce(
         "Content-Type": "application/json",
         Accept: "text/event-stream",
       },
-      body: JSON.stringify({ ...body, model: MODEL, stream: true }),
+      body: JSON.stringify({
+        ...body,
+        messages,
+        model: MODEL,
+        stream: true,
+        enable_thinking: false,
+        chat_template_kwargs: { enable_thinking: false, thinking: false },
+      }),
     });
 
     if (!res.ok || !res.body) {
@@ -96,7 +119,6 @@ async function streamOnce(
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      lastByte = Date.now();
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
@@ -124,7 +146,10 @@ async function streamOnce(
         if (!choice) continue;
         // Thinking output is dropped on the floor, never appended.
         const piece = choice.delta?.content ?? choice.message?.content ?? "";
-        if (piece) out += piece;
+        if (piece) {
+          out += piece;
+          lastContent = Date.now();
+        }
         if (choice.finish_reason) finished = true;
       }
     }
