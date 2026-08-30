@@ -201,13 +201,15 @@ export async function planAndSeedPart(partId: string) {
 export async function writeChunk(chunkId: string, keyIndex: number) {
   const db = getPublicDb();
   const { data: chunk } = await db.from("story_chunks").select("*").eq("id", chunkId).single();
-  if (!chunk) throw new Error("chunk not found");
+  // The chunk row can vanish mid-run (replan, part deleted, story deleted).
+  // That is not a failure: the next loop round just re-reads the fresh list.
+  if (!chunk) return { skipped: true, status: "missing", wordCount: 0 };
   if (chunk.status === "done" && chunk.content.length > 0) {
     return { skipped: true, status: "done", wordCount: chunk.word_count };
   }
 
   const { data: part } = await db.from("story_parts").select("*").eq("id", chunk.part_id).single();
-  if (!part) throw new Error("part not found");
+  if (!part) return { skipped: true, status: "missing", wordCount: 0 };
 
   const plan = (part.plan ?? {}) as { title?: string; chapters?: Chapter[] };
   const chapters = plan.chapters ?? [];
