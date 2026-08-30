@@ -209,7 +209,7 @@ export async function writeChunk(chunkId: string, keyIndex: number) {
   }
 
   const { data: part } = await db.from("story_parts").select("*").eq("id", chunk.part_id).single();
-  if (!part) throw new Error("part not found");
+  if (!part) return { skipped: true, status: "missing", wordCount: 0 };
 
   const plan = (part.plan ?? {}) as { title?: string; chapters?: Chapter[] };
   const chapters = plan.chapters ?? [];
