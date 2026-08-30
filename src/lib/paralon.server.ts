@@ -71,8 +71,8 @@ async function streamOnce(
   }, 2000);
 
   try {
-    const messages = Array.isArray(body.messages)
-      ? body.messages.map((message, index, all) => {
+    const messages = Array.isArray(body["messages"])
+      ? body["messages"].map((message, index, all) => {
           if (
             index !== all.length - 1 ||
             !message ||
@@ -86,7 +86,7 @@ async function streamOnce(
           }
           return { ...message, content: `${message.content}\n\n/no_think` };
         })
-      : body.messages;
+      : body["messages"];
 
     const res = await fetch(BASE_URL, {
       method: "POST",
