@@ -12,7 +12,7 @@ export const MODEL = "qwen3.8-27b";
 
 // Free-tier guard rails.
 const RATE_LIMIT_PER_KEY_PER_MIN = 55;
-const STALL_MS = 60_000; // no new visible answer text for this long => retry on another key
+const STALL_MS = 35_000; // no new visible answer text for this long => retry on another key
 const HARD_TIMEOUT_MS = 180_000;
 
 export function getKeys(): string[] {
@@ -71,6 +71,23 @@ async function streamOnce(
   }, 2000);
 
   try {
+    const messages = Array.isArray(body.messages)
+      ? body.messages.map((message, index, all) => {
+          if (
+            index !== all.length - 1 ||
+            !message ||
+            typeof message !== "object" ||
+            !("role" in message) ||
+            !("content" in message) ||
+            message.role !== "user" ||
+            typeof message.content !== "string"
+          ) {
+            return message;
+          }
+          return { ...message, content: `${message.content}\n\n/no_think` };
+        })
+      : body.messages;
+
     const res = await fetch(BASE_URL, {
       method: "POST",
       signal: controller.signal,
@@ -81,6 +98,7 @@ async function streamOnce(
       },
       body: JSON.stringify({
         ...body,
+        messages,
         model: MODEL,
         stream: true,
         enable_thinking: false,
