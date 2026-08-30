@@ -55,10 +55,7 @@ type StreamResult = { text: string; finished: boolean };
 // arrive within a few seconds, so neither the host nor the browser gives up, and
 // a genuinely frozen generation is detected by the stall timer instead of by a
 // five minute silence.
-async function streamOnce(
-  key: string,
-  body: Record<string, unknown>,
-): Promise<StreamResult> {
+async function streamOnce(key: string, body: Record<string, unknown>): Promise<StreamResult> {
   const controller = new AbortController();
   let lastContent = Date.now();
   const started = Date.now();
